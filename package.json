@@ -1,6 +1,6 @@
 {
   "name": "mexc-futures-trading-bot",
-  "version": "34.4.14-strict-pullback-risk-guard",
+  "version": "34.4.4-discovery-fixed",
   "private": true,
   "main": "server.js",
   "scripts": {
@@ -8,8 +8,5 @@
   },
   "dependencies": {
     "express": "^4.21.2"
-  },
-  "engines": {
-    "node": ">=20"
   }
 }

@@ -11,7 +11,7 @@ const PORT = Number(process.env.PORT || 8080);
 const BOT_ADMIN_TOKEN = String(process.env.BOT_ADMIN_TOKEN || "").trim();
 const BOT_STATE_FILE = process.env.BOT_STATE_FILE || path.join(process.env.RAILWAY_VOLUME_MOUNT_PATH || ".", "bot-state-v32.json");
 const BOT_TIMEZONE = String(process.env.BOT_TIMEZONE || "Asia/Kabul");
-// v34.4.14 QUALITY PROFILE — STRICT PULLBACK ENTRY + RISK GUARD MODE
+// v34.4.2 QUALITY PROFILE — NO PULLBACK ENTRY MODE
 // Designed to avoid top entries while still producing a reasonable number of
 // high-quality setups. The profile can be disabled explicitly with
 // SMART_PULLBACK_PROFILE=false for legacy behavior.
@@ -19,10 +19,10 @@ const SMART_PULLBACK_PROFILE = String(process.env.SMART_PULLBACK_PROFILE ?? "tru
 
 const MIN_RISK_REWARD = Math.max(
   0.5,
-  Number(process.env.MIN_RISK_REWARD || (SMART_PULLBACK_PROFILE ? 1.60 : 1.40))
+  Number(process.env.MIN_RISK_REWARD || (SMART_PULLBACK_PROFILE ? 1.45 : 1.25))
 );
-const MIN_SIGNAL_SCORE = Math.max(50, Math.min(100, Number(process.env.MIN_SIGNAL_SCORE || (SMART_PULLBACK_PROFILE ? 80 : 82))));
-const MIN_SCORE_EDGE = Math.max(0, Number(process.env.MIN_SCORE_EDGE || (SMART_PULLBACK_PROFILE ? 7 : 8)));
+const MIN_SIGNAL_SCORE = Math.max(50, Math.min(100, Number(process.env.MIN_SIGNAL_SCORE || (SMART_PULLBACK_PROFILE ? 68 : 78))));
+const MIN_SCORE_EDGE = Math.max(0, Number(process.env.MIN_SCORE_EDGE || (SMART_PULLBACK_PROFILE ? 3 : 8)));
 const BASE_URL = "https://api.mexc.com";
 
 const ACCESS_KEY = process.env.MEXC_ACCESS_KEY || "";
@@ -59,34 +59,35 @@ const UNIVERSE_REFRESH_TTL_MS = Math.max(60*1000, Number(process.env.UNIVERSE_RE
 const ADX_MIN = Math.max(10, Number(process.env.ADX_MIN || 18));
 const VOLUME_MULTIPLIER = Math.max(0.75, Number(process.env.VOLUME_MULTIPLIER || 1.15));
 
-// BREAKOUT + RETEST ENGINE: entries require a confirmed closed 5m breakout, a pullback/retest, and a directional reclaim. Breakout continuation without a pullback is blocked. Structure-based SL uses the local swing + ATR buffer.
+// BREAKOUT + RETEST ENGINE: entries require a confirmed closed 5m breakout, a pullback/retest of the broken level, and a directional reclaim. Early live-candle entries are off by default. Structure-based SL uses the local swing + ATR buffer.
 // A live entry can only come from a confirmed closed 5m candle breaking the
 // previous N-candle high/low with volume, body and close-location confirmation.
 const BREAKOUT_LOOKBACK = Math.max(5, Number(process.env.BREAKOUT_LOOKBACK || 20));
 const BREAKOUT_BUFFER_PCT = Math.max(0, Number(process.env.BREAKOUT_BUFFER_PCT || 0.0005));
-const BREAKOUT_VOLUME_MULTIPLIER = Math.max(1, Number(process.env.BREAKOUT_VOLUME_MULTIPLIER || (SMART_PULLBACK_PROFILE ? 1.25 : 1.5)));
-const BREAKOUT_MIN_BODY_ATR = Math.max(0.05, Number(process.env.BREAKOUT_MIN_BODY_ATR || (SMART_PULLBACK_PROFILE ? 0.28 : 0.35)));
-const BREAKOUT_MIN_BODY_RATIO = Math.max(0.20, Math.min(0.95, Number(process.env.BREAKOUT_MIN_BODY_RATIO || (SMART_PULLBACK_PROFILE ? 0.40 : 0.45))));
-const BREAKOUT_CLOSE_LOCATION_MIN = Math.max(0.50, Math.min(0.98, Number(process.env.BREAKOUT_CLOSE_LOCATION_MIN || (SMART_PULLBACK_PROFILE ? 0.65 : 0.70))));
-const BREAKOUT_MAX_EXTENSION_ATR = Math.max(0.25, Number(process.env.BREAKOUT_MAX_EXTENSION_ATR || (SMART_PULLBACK_PROFILE ? 0.95 : 0.75)));
-const BREAKOUT_MIN_SCORE = Math.max(50, Math.min(100, Number(process.env.BREAKOUT_MIN_SCORE || (SMART_PULLBACK_PROFILE ? 68 : 70))));
+const BREAKOUT_VOLUME_MULTIPLIER = Math.max(1, Number(process.env.BREAKOUT_VOLUME_MULTIPLIER || (SMART_PULLBACK_PROFILE ? 1.08 : 1.5)));
+const BREAKOUT_MIN_BODY_ATR = Math.max(0.05, Number(process.env.BREAKOUT_MIN_BODY_ATR || (SMART_PULLBACK_PROFILE ? 0.20 : 0.35)));
+const BREAKOUT_MIN_BODY_RATIO = Math.max(0.20, Math.min(0.95, Number(process.env.BREAKOUT_MIN_BODY_RATIO || (SMART_PULLBACK_PROFILE ? 0.30 : 0.45))));
+const BREAKOUT_CLOSE_LOCATION_MIN = Math.max(0.50, Math.min(0.98, Number(process.env.BREAKOUT_CLOSE_LOCATION_MIN || (SMART_PULLBACK_PROFILE ? 0.60 : 0.70))));
+const BREAKOUT_MAX_EXTENSION_ATR = Math.max(0.25, Number(process.env.BREAKOUT_MAX_EXTENSION_ATR || (SMART_PULLBACK_PROFILE ? 1.25 : 0.75)));
+const BREAKOUT_MIN_SCORE = Math.max(50, Math.min(100, Number(process.env.BREAKOUT_MIN_SCORE || (SMART_PULLBACK_PROFILE ? 65 : 70))));
 const BREAKOUT_REQUIRE_VOLUME = String(process.env.BREAKOUT_REQUIRE_VOLUME ?? "true").toLowerCase() === "true";
-// Legacy breakout-retest flags are retained only for compatibility. The live
-// entry engine below independently requires a meaningful pullback/retest and
-// a closed-candle directional reclaim; these legacy flags cannot disable that safety gate.
+// v34.4.5: NO-PULLBACK ENTRY MODE.
+// Breakout/retest is NOT required. A valid closed-candle breakout or
+// continuation can create a signal when the quality/HTF/RR protections pass.
+// This is intentionally hard-disabled so an old Railway environment variable
+// cannot silently block all signals again.
 const REQUIRE_BREAKOUT_RETEST = false;
 const STRICT_BREAKOUT_RETEST_REQUIRED = false;
 // EARLY BREAKOUT: allow entry during the live 5m trigger candle instead of
 // waiting for the candle to fully close. This reduces late entries while
 // keeping strict extension/volume/body guards to avoid chasing.
-// Strictly closed-candle entries: live/in-progress trigger candles are never allowed.
-const EARLY_BREAKOUT_ENABLED = false;
-const EARLY_BREAKOUT_VOLUME_MULTIPLIER = Math.max(1, Number(process.env.EARLY_BREAKOUT_VOLUME_MULTIPLIER || 1.15));
-const EARLY_BREAKOUT_MIN_BODY_ATR = Math.max(0.05, Number(process.env.EARLY_BREAKOUT_MIN_BODY_ATR || 0.20));
-const EARLY_BREAKOUT_MIN_BODY_RATIO = Math.max(0.15, Math.min(0.90, Number(process.env.EARLY_BREAKOUT_MIN_BODY_RATIO || 0.30)));
-const EARLY_BREAKOUT_CLOSE_LOCATION_MIN = Math.max(0.50, Math.min(0.95, Number(process.env.EARLY_BREAKOUT_CLOSE_LOCATION_MIN || 0.60)));
-const EARLY_BREAKOUT_MAX_EXTENSION_ATR = Math.max(0.20, Number(process.env.EARLY_BREAKOUT_MAX_EXTENSION_ATR || 0.75));
-const EARLY_BREAKOUT_MIN_SCORE = Math.max(50, Math.min(100, Number(process.env.EARLY_BREAKOUT_MIN_SCORE || 70)));
+const EARLY_BREAKOUT_ENABLED = String(process.env.EARLY_BREAKOUT_ENABLED ?? "false").toLowerCase() === "true";
+const EARLY_BREAKOUT_VOLUME_MULTIPLIER = Math.max(1, Number(process.env.EARLY_BREAKOUT_VOLUME_MULTIPLIER || 1.08));
+const EARLY_BREAKOUT_MIN_BODY_ATR = Math.max(0.05, Number(process.env.EARLY_BREAKOUT_MIN_BODY_ATR || 0.15));
+const EARLY_BREAKOUT_MIN_BODY_RATIO = Math.max(0.15, Math.min(0.90, Number(process.env.EARLY_BREAKOUT_MIN_BODY_RATIO || 0.25)));
+const EARLY_BREAKOUT_CLOSE_LOCATION_MIN = Math.max(0.50, Math.min(0.95, Number(process.env.EARLY_BREAKOUT_CLOSE_LOCATION_MIN || 0.58)));
+const EARLY_BREAKOUT_MAX_EXTENSION_ATR = Math.max(0.20, Number(process.env.EARLY_BREAKOUT_MAX_EXTENSION_ATR || 1.15));
+const EARLY_BREAKOUT_MIN_SCORE = Math.max(50, Math.min(100, Number(process.env.EARLY_BREAKOUT_MIN_SCORE || 65)));
 const ANALYSIS_TIMEFRAMES = ["Min5","Min15","Min30","Min60","Hour4","Day1"];
 const SR_LOOKBACK = Math.max(20, Number(process.env.SR_LOOKBACK || 50));
 const NEWS_RISK_ENABLED = String(process.env.NEWS_RISK_ENABLED ?? "true").toLowerCase() === "true";
@@ -104,16 +105,16 @@ const NEWS_MARKET_RISK_TERMS = ["exchange collapse","exchange hacked","market cr
 const TARGET_LEVERAGE = Math.max(1, Number(process.env.TARGET_LEVERAGE || 20));
 const CONFIGURED_OPEN_TYPE = Math.max(1, Math.min(2, Number(process.env.OPEN_TYPE || 1)));
 const CONFIGURED_POSITION_MODE = Math.max(1, Math.min(2, Number(process.env.POSITION_MODE || 2)));
-const STOP_LOSS_PCT = Number(process.env.STOP_LOSS_PCT || 0.0125);
-const CONFIGURED_TAKE_PROFIT_PCT = Number(process.env.TAKE_PROFIT_PCT || 0.02);
+const STOP_LOSS_PCT = Number(process.env.STOP_LOSS_PCT || 0.02);
+const CONFIGURED_TAKE_PROFIT_PCT = Number(process.env.TAKE_PROFIT_PCT || 0.035);
 const FORCE_AUTO_STOP_LOSS = String(process.env.FORCE_AUTO_STOP_LOSS ?? "true").toLowerCase() === "true";
 const MANUAL_STOP_LOSS = FORCE_AUTO_STOP_LOSS ? false : String(process.env.MANUAL_STOP_LOSS ?? "false").toLowerCase() === "true";
 // Runner mode: use a distant 10% protective TP so strong moves are not cut at 2.5%.
 // From +2.5%, the existing trailing/break-even manager protects the profit.
-const TAKE_PROFIT_PCT = Math.max(0.02, Math.min(0.04, CONFIGURED_TAKE_PROFIT_PCT));
+const TAKE_PROFIT_PCT = Math.max(0.025, Math.min(0.045, CONFIGURED_TAKE_PROFIT_PCT));
 const ADAPTIVE_TP_ENABLED = String(process.env.ADAPTIVE_TP_ENABLED ?? "true").toLowerCase() === "true";
 const ADAPTIVE_TP_START_PCT = TAKE_PROFIT_PCT;
-const ADAPTIVE_TP_MAX_PCT = Math.max(TAKE_PROFIT_PCT, Math.min(0.04, Number(process.env.ADAPTIVE_TP_MAX_PCT || 0.04)));
+const ADAPTIVE_TP_MAX_PCT = Math.max(TAKE_PROFIT_PCT, Math.min(0.045, Number(process.env.ADAPTIVE_TP_MAX_PCT || 0.045)));
 const ADAPTIVE_TP_STEP_PCT = Math.max(0.005, Number(process.env.ADAPTIVE_TP_STEP_PCT || 0.015));
 const ADAPTIVE_TP_EXTEND_TRIGGER_PCT = Math.max(0.02, Number(process.env.ADAPTIVE_TP_EXTEND_TRIGGER_PCT || 0.025));
 const ADAPTIVE_TP_STRONG_ADX = Math.max(10, Number(process.env.ADAPTIVE_TP_STRONG_ADX || 20));
@@ -125,10 +126,10 @@ const TARGET_FIRST_MAX_TP_PCT = ADAPTIVE_TP_MAX_PCT;
 const TARGET_FIRST_ATR_MULT = Math.max(0.25, Number(process.env.TARGET_FIRST_ATR_MULT || 1.00));
 
 const REAL_TRADING_ENABLED =
-  String(process.env.REAL_TRADING_ENABLED || "true").toLowerCase() === "true";
+  String(process.env.REAL_TRADING_ENABLED || "false").toLowerCase() === "true";
 
 const AUTO_TRADING_ENABLED =
-  String(process.env.AUTO_TRADING_ENABLED || "true").toLowerCase() === "true";
+  String(process.env.AUTO_TRADING_ENABLED || "false").toLowerCase() === "true";
 
 // Keep the entry scan responsive even if Railway has an old AUTO_INTERVAL_MINUTES
 // value such as 120 minutes. A long scheduler interval can leave a recovered
@@ -148,38 +149,28 @@ const TRADE_MANAGER_INTERVAL_SECONDS = Math.max(5, Number(process.env.TRADE_MANA
 const AUTO_RUN_STALE_MS = Math.max(60*1000, Number(process.env.AUTO_RUN_STALE_MS || 8*60*1000));
 const BREAK_EVEN_ENABLED =
   !MANUAL_STOP_LOSS && String(process.env.BREAK_EVEN_ENABLED ?? "true").toLowerCase() === "true";
-const BREAK_EVEN_TRIGGER_PCT = Math.max(0, Number(process.env.BREAK_EVEN_TRIGGER_PCT || 0.010));
-const BREAK_EVEN_OFFSET_PCT = Math.max(0, Number(process.env.BREAK_EVEN_OFFSET_PCT || 0.002));
+const BREAK_EVEN_TRIGGER_PCT = Math.max(0, Number(process.env.BREAK_EVEN_TRIGGER_PCT || 0.020));
+const BREAK_EVEN_OFFSET_PCT = Math.max(0, Number(process.env.BREAK_EVEN_OFFSET_PCT || 0.0015));
 const TRAILING_STOP_ENABLED =
   !MANUAL_STOP_LOSS && String(process.env.TRAILING_STOP_ENABLED ?? "true").toLowerCase() === "true";
-const TRAILING_TRIGGER_PCT = Math.max(BREAK_EVEN_TRIGGER_PCT, Number(process.env.TRAILING_TRIGGER_PCT || 0.020));
-const TRAILING_STOP_PCT = Math.max(0.001, Number(process.env.TRAILING_STOP_PCT || 0.008));
+const TRAILING_TRIGGER_PCT = Math.max(0.025, Number(process.env.TRAILING_TRIGGER_PCT || 0.030));
+const TRAILING_STOP_PCT = Math.max(0.001, Number(process.env.TRAILING_STOP_PCT || 0.015));
 const MIN_STOP_DISTANCE_PCT = Math.max(0.0005, Number(process.env.MIN_STOP_DISTANCE_PCT || 0.001));
-const MAX_OPEN_POSITIONS = Math.max(1, Number(process.env.MAX_OPEN_POSITIONS || (SMART_PULLBACK_PROFILE ? 6 : 6)));
-const MAX_SAME_DIRECTION_POSITIONS = Math.max(1, Number(process.env.MAX_SAME_DIRECTION_POSITIONS || (SMART_PULLBACK_PROFILE ? 6 : 6)));
-const MAX_TRADES_PER_DAY = Math.min(20, Math.max(1, Number(process.env.MAX_TRADES_PER_DAY || 20)));
-// Account-level circuit breaker: stop opening new trades after a meaningful
-// daily equity drawdown. This is a hard safety gate, not a performance guarantee.
-const DAILY_DRAWDOWN_PROTECTION_ENABLED = String(process.env.DAILY_DRAWDOWN_PROTECTION_ENABLED ?? "true").toLowerCase() === "true";
-const MAX_DAILY_DRAWDOWN_PCT = Math.max(0.005, Math.min(0.20, Number(process.env.MAX_DAILY_DRAWDOWN_PCT || 0.03)));
-const ENTRY_COOLDOWN_ALL_TRADES = String(process.env.ENTRY_COOLDOWN_ALL_TRADES ?? "true").toLowerCase() === "true";
-const MAX_ENTRY_SLIPPAGE_PCT = Math.max(0.0005, Math.min(0.02, Number(process.env.MAX_ENTRY_SLIPPAGE_PCT || 0.0025)));
-const REQUIRE_DAILY_ALIGNMENT = String(process.env.REQUIRE_DAILY_ALIGNMENT ?? "true").toLowerCase() === "true";
-const REQUIRE_15M_ALIGNMENT = String(process.env.REQUIRE_15M_ALIGNMENT ?? "true").toLowerCase() === "true";
-const REQUIRE_1H_ALIGNMENT = String(process.env.REQUIRE_1H_ALIGNMENT ?? "true").toLowerCase() === "true";
-const MIN_PRECISION_SCORE = Math.max(50, Math.min(100, Number(process.env.MIN_PRECISION_SCORE || 80)));
+const MAX_OPEN_POSITIONS = Math.max(1, Number(process.env.MAX_OPEN_POSITIONS || (SMART_PULLBACK_PROFILE ? 1 : 3)));
+const MAX_SAME_DIRECTION_POSITIONS = Math.max(1, Number(process.env.MAX_SAME_DIRECTION_POSITIONS || (SMART_PULLBACK_PROFILE ? 1 : 2)));
+const MAX_TRADES_PER_DAY = Math.max(1, Number(process.env.MAX_TRADES_PER_DAY || 50));
 const ENTRY_COOLDOWN_MINUTES = Math.max(0, Number(process.env.ENTRY_COOLDOWN_MINUTES || 20));
-const MAX_LOSS_STREAK = Math.max(1, Number(process.env.MAX_LOSS_STREAK || 2));
+const MAX_LOSS_STREAK = Math.max(1, Number(process.env.MAX_LOSS_STREAK || 3));
 const LOSS_STREAK_COOLDOWN_MINUTES = Math.max(15, Number(process.env.LOSS_STREAK_COOLDOWN_MINUTES || 60));
 const VOLATILITY_SPIKE_ATR_MULTIPLIER = Math.max(1.5, Number(process.env.VOLATILITY_SPIKE_ATR_MULTIPLIER || 2.5));
-const LIQUIDITY_MIN_24H_USDT = Math.max(0, Number(process.env.LIQUIDITY_MIN_24H_USDT || 200000));
-const MAX_SPREAD_PCT = Math.max(0.0001, Number(process.env.MAX_SPREAD_PCT || 0.0015));
+const LIQUIDITY_MIN_24H_USDT = Math.max(0, Number(process.env.LIQUIDITY_MIN_24H_USDT || 150000));
+const MAX_SPREAD_PCT = Math.max(0.0001, Number(process.env.MAX_SPREAD_PCT || 0.003));
 // Entry-location protection: avoid chasing extended moves into nearby support/resistance.
 const ENTRY_SR_MIN_ROOM = Math.max(0.05, Math.min(0.35, Number(process.env.ENTRY_SR_MIN_ROOM || 0.08)));
 const ENTRY_SR_BUFFER_ATR = Math.max(0.10, Number(process.env.ENTRY_SR_BUFFER_ATR || 0.25));
 const ENTRY_MAX_DISTANCE_E21_ATR = Math.max(0.75, Number(process.env.ENTRY_MAX_DISTANCE_E21_ATR || 2.75));
-const ENTRY_MIN_TP_ROOM_ATR = Math.max(0.10, Number(process.env.ENTRY_MIN_TP_ROOM_ATR || 0.35));
-const PULLBACK_MAX_BARS_SINCE_TOUCH = Math.max(2, Number(process.env.PULLBACK_MAX_BARS_SINCE_TOUCH || 16));
+const ENTRY_MIN_TP_ROOM_ATR = Math.max(0.10, Number(process.env.ENTRY_MIN_TP_ROOM_ATR || 0.25));
+const PULLBACK_MAX_BARS_SINCE_TOUCH = Math.max(2, Number(process.env.PULLBACK_MAX_BARS_SINCE_TOUCH || 20));
 const ENTRY_MAX_PULLBACK_DISTANCE_ATR = Math.max(0.25, Number(process.env.ENTRY_MAX_PULLBACK_DISTANCE_ATR || 1.50));
 // Balanced pullback protection: allow strong setups from a meaningful >=0.30 ATR pullback, while S/R and anti-chase protections remain hard.
 const ENTRY_MIN_PULLBACK_DEPTH_ATR = Math.max(0.30, Number(process.env.ENTRY_MIN_PULLBACK_DEPTH_ATR || 0.30));
@@ -187,23 +178,15 @@ const ENTRY_TRIGGER_MIN_PULLBACK_DEPTH_ATR = Math.max(0.25, Number(process.env.E
 // Strict trigger-quality protection: only enter after a very recent pullback
 // and a clear 5m reclaim candle. This reduces late/chasing entries.
 const ENTRY_TRIGGER_MAX_BARS = Math.max(2, Number(process.env.ENTRY_TRIGGER_MAX_BARS || (SMART_PULLBACK_PROFILE ? 10 : 20)));
-const ENTRY_TRIGGER_MAX_DISTANCE_ATR = Math.max(0.25, Number(process.env.ENTRY_TRIGGER_MAX_DISTANCE_ATR || (SMART_PULLBACK_PROFILE ? 1.35 : 1.75)));
+const ENTRY_TRIGGER_MAX_DISTANCE_ATR = Math.max(0.25, Number(process.env.ENTRY_TRIGGER_MAX_DISTANCE_ATR || (SMART_PULLBACK_PROFILE ? 1.75 : 1.75)));
 const ENTRY_TRIGGER_MIN_BODY_PCT = Math.max(0.10, Math.min(0.80, Number(process.env.ENTRY_TRIGGER_MIN_BODY_PCT || 0.15)));
 const ENTRY_TRIGGER_MAX_WICK_PCT = Math.max(0.15, Math.min(0.80, Number(process.env.ENTRY_TRIGGER_MAX_WICK_PCT || 0.75)));
-// Minimum free room to the next recent S/R level, measured in ATR. This is
-// intentionally stricter than the old percentage-only filter to prevent late
-// entries directly underneath resistance / above support.
-const ENTRY_SR_MIN_ROOM_ATR = Math.max(0.25, Number(process.env.ENTRY_SR_MIN_ROOM_ATR || 0.60));
-const ENTRY_MOMENTUM_MIN_VOLUME = Math.max(0.75, Number(process.env.ENTRY_MOMENTUM_MIN_VOLUME || 1.00));
-const ENTRY_MOMENTUM_MIN_BODY_ATR = Math.max(0.05, Number(process.env.ENTRY_MOMENTUM_MIN_BODY_ATR || 0.15));
-const ENTRY_MOMENTUM_CLOSE_LOCATION = Math.max(0.50, Math.min(0.90, Number(process.env.ENTRY_MOMENTUM_CLOSE_LOCATION || 0.60)));
 // Hard pullback/retest entry protection. A high score alone can never create
 // a live order. The 15m setup must have a recent pullback and the 5m trigger
 // must reclaim that area in the intended direction.
-// v34.4.14: pullback/retest is a HARD entry requirement.
-// A trend score alone can never create an order; the bot must first see a
-// meaningful pullback and then a closed-candle directional reclaim.
-const REQUIRE_PULLBACK_ENTRY = true;
+// v34.4.5: pullback/retest is never a hard entry blocker.
+// Anti-chase, extension, volatility, HTF alignment, score and RR checks remain active.
+const REQUIRE_PULLBACK_ENTRY = false;
 const ENTRY_SETUP_PULLBACK_MAX_BARS = Math.max(2, Number(process.env.ENTRY_SETUP_PULLBACK_MAX_BARS || 8));
 const ENTRY_TRIGGER_PULLBACK_MAX_BARS = Math.max(2, Number(process.env.ENTRY_TRIGGER_PULLBACK_MAX_BARS || 6));
 const ENTRY_PULLBACK_RECLAIM_BUFFER_PCT = Math.max(0.0002, Number(process.env.ENTRY_PULLBACK_RECLAIM_BUFFER_PCT || 0.0008));
@@ -215,8 +198,8 @@ const PULLBACK_LOOKBACK = Math.max(6, Number(process.env.PULLBACK_LOOKBACK || 20
 const PULLBACK_TOUCH_TOLERANCE_PCT = Math.max(0.001, Number(process.env.PULLBACK_TOUCH_TOLERANCE_PCT || 0.012));
 const PULLBACK_RECLAIM_BUFFER_PCT = Math.max(0.0001, Number(process.env.PULLBACK_RECLAIM_BUFFER_PCT || 0.0006));
 const STRUCTURE_STOP_BUFFER_ATR = Math.max(0.05, Number(process.env.STRUCTURE_STOP_BUFFER_ATR || (SMART_PULLBACK_PROFILE ? 0.25 : 0.35)));
-const STRUCTURE_STOP_MIN_PCT = Math.max(0.004, Number(process.env.STRUCTURE_STOP_MIN_PCT || (SMART_PULLBACK_PROFILE ? 0.005 : 0.006)));
-const MAX_STRUCTURE_STOP_PCT = Math.max(STRUCTURE_STOP_MIN_PCT, Number(process.env.MAX_STRUCTURE_STOP_PCT || (SMART_PULLBACK_PROFILE ? 0.0125 : 0.015)));
+const STRUCTURE_STOP_MIN_PCT = Math.max(0.004, Number(process.env.STRUCTURE_STOP_MIN_PCT || (SMART_PULLBACK_PROFILE ? 0.005 : 0.01)));
+const MAX_STRUCTURE_STOP_PCT = Math.max(STRUCTURE_STOP_MIN_PCT, Number(process.env.MAX_STRUCTURE_STOP_PCT || (SMART_PULLBACK_PROFILE ? 0.025 : 0.03)));
 const PROTECTION_VERIFY_RETRIES = Math.max(4, Number(process.env.PROTECTION_VERIFY_RETRIES || 8));
 const PROTECTION_VERIFY_DELAY_MS = Math.max(500, Number(process.env.PROTECTION_VERIFY_DELAY_MS || 1000));
 
@@ -995,10 +978,9 @@ async function getAdvancedSignal(symbol=SYMBOL) {
   const cached = advancedSignalCache.get(symbol);
   if (cached && Date.now() - cached.time < ADVANCED_SIGNAL_CACHE_TTL_MS) return cached.data;
 
-  // ENTRY ENGINE v34.4.14: only a confirmed CLOSED 5m pullback/reclaim or
-  // closed breakout-retest can trigger an entry. Continuation/no-pullback
-  // entries are blocked. 15m pullback, momentum, anti-chase and S/R room
-  // protections are applied before an order can reach preflight.
+  // ENTRY ENGINE: only a confirmed CLOSED 5m breakout followed by a pullback/retest reclaim can trigger an entry.
+  // A real 15m pullback/setup gate and 1h anti-opposite-trend gate prevent
+  // chasing the top/bottom or entering against the larger move.
   const c5 = await getCandles(symbol, "Min5");
   const breakout = breakoutOpportunityFromCandles(c5);
   const b = (breakout && breakout.signal !== "WAIT") ? breakout : fallbackMomentumOpportunity(c5);
@@ -1067,40 +1049,19 @@ async function getAdvancedSignal(symbol=SYMBOL) {
     finalSignal = "WAIT";
     reason = `Higher-timeframe conflict: 15m=${htf15?.bias || "NA"}, 1h=${htf60?.bias || "NA"}, signal=${signal}`;
   }
+  // 1D is context, not a hard entry blocker. A strong 5m/15m setup can
+  // trade against a daily trend when the shorter-timeframe confirmation is clear.
+  // This prevents the scanner from going silent for hours during normal rotations.
   if (finalSignal !== "WAIT" && dailyBias?.bias && dailyBias.bias !== "NEUTRAL" && dailyBias.bias !== signal) {
-    finalSignal = "WAIT";
-    reason = `1D trend conflict: daily=${dailyBias.bias}, signal=${signal}`;
+    reason = `${signal} short-term setup against 1D context (${dailyBias.bias}); allowed by balanced profile`;
   }
   // Smart pullback profile: accept either a confirmed 5m breakout-retest
   // reclaim OR a fresh 15m pullback setup. This preserves anti-top-entry
   // protection without requiring both timeframes to touch the same level.
-  // v34.4.14: BOTH setup pullback and the 5m trigger pullback are required.
-  // A score/HTF trend alone must never create an order.
-  const smartPullbackPass = Boolean(setupPullbackPass) &&
-    (Boolean(b.retestConfirmed) || Boolean(b.pullbackTriggerPass));
+  const smartPullbackPass = Boolean(b.retestConfirmed) || Boolean(setupPullbackPass);
   if (finalSignal !== "WAIT" && REQUIRE_PULLBACK_ENTRY && !smartPullbackPass) {
     finalSignal = "WAIT";
-    reason = `Pullback confirmation missing for ${signal}; entry blocked to avoid top/chasing entry`;
-  }
-  if (finalSignal !== "WAIT" && Number(b.score || 0) < MIN_SIGNAL_SCORE) {
-    finalSignal = "WAIT";
-    reason = `Signal score too low (${Number(b.score || 0).toFixed(1)} < ${MIN_SIGNAL_SCORE})`;
-  }
-  if (finalSignal !== "WAIT" && Number(b.precisionScore ?? b.score ?? 0) < MIN_PRECISION_SCORE) {
-    finalSignal = "WAIT";
-    reason = `Precision score too low (${Number(b.precisionScore ?? b.score ?? 0).toFixed(1)} < ${MIN_PRECISION_SCORE})`;
-  }
-  if (finalSignal !== "WAIT" && REQUIRE_15M_ALIGNMENT && htf15?.bias !== signal) {
-    finalSignal = "WAIT";
-    reason = `15m alignment required: 15m=${htf15?.bias || "NA"}, signal=${signal}`;
-  }
-  if (finalSignal !== "WAIT" && REQUIRE_1H_ALIGNMENT && htf60?.bias !== signal) {
-    finalSignal = "WAIT";
-    reason = `1h alignment required: 1h=${htf60?.bias || "NA"}, signal=${signal}`;
-  }
-  if (finalSignal !== "WAIT" && REQUIRE_DAILY_ALIGNMENT && dailyBias?.bias !== signal) {
-    finalSignal = "WAIT";
-    reason = `Daily alignment required: 1D=${dailyBias?.bias || "NA"}, signal=${signal}`;
+    reason = `Pullback/retest not confirmed for ${signal}; entry blocked to avoid top entry`;
   }
   if (finalSignal !== "WAIT" && riskReward < MIN_RISK_REWARD) {
     finalSignal = "WAIT";
@@ -1171,13 +1132,7 @@ async function getAdvancedSignal(symbol=SYMBOL) {
       pullbackEntryPass:Boolean(b.pullbackEntryPass),
       setupPullbackPass,
       smartPullbackPass,
-      triggerPullbackPass:Boolean(b.retestConfirmed || b.pullbackTriggerPass),
-      pullbackDepthAtr:Number(b.pullbackDepthAtr || htf15Analysis?.pullbackRetest?.pullbackDepthAtr || 0),
-      pullbackBarsAgo:Number.isFinite(Number(b.pullbackBarsAgo)) ? Number(b.pullbackBarsAgo) : null,
-      resistanceRoomAtr:Number.isFinite(Number(b.resistanceRoomAtr)) ? Number(b.resistanceRoomAtr) : null,
-      momentumVolumeRatio:Number(b.volumeRatio || 0),
-      momentumBodyAtr:Number(b.bodyAtr || 0),
-      resistanceRoomMinAtr:ENTRY_SR_MIN_ROOM_ATR,
+      triggerPullbackPass:Boolean(b.retestConfirmed),
       lateEntryRisk,
       volatilitySpike,
       higherTimeframeAlignmentPass:htfAlignmentPass,
@@ -1798,15 +1753,7 @@ async function placeMarketOrder(symbol, direction) {
   }
 
   const side = direction === "LONG" ? 1 : 3;
-  // Final quote sanity check: do not send a market order if price moved too far
-  // away from the price used to build the signal/protection plan.
-  const liveTicker = await mexc("GET", "/api/v1/contract/ticker", { symbol });
-  const livePrice = num(liveTicker?.data?.lastPrice ?? liveTicker?.data?.fairPrice ?? liveTicker?.data?.indexPrice);
-  if (!(livePrice > 0) || !(pf.price > 0)) throw new Error("Fresh market price unavailable; entry blocked");
-  const entryDrift = Math.abs(livePrice - pf.price) / pf.price;
-  if (entryDrift > MAX_ENTRY_SLIPPAGE_PCT) throw new Error(`Entry price moved ${(entryDrift*100).toFixed(3)}%; trade blocked`);
-
-  const targetPlan = protectionPricesFor(direction, livePrice, pf.contract, pf.signal?.atr14, pf.signal?.breakout);
+  const targetPlan = protectionPricesFor(direction, pf.price, pf.contract, pf.signal?.atr14, pf.signal?.breakout);
   const stop = targetPlan.stop;
   const take = targetPlan.take;
   if (!targetPlan.valid || !(stop > 0)) throw new Error(`Protection plan rejected: ${targetPlan.reason || "unsafe structure stop"}`);
@@ -1991,8 +1938,8 @@ async function managePosition(symbol, position) {
   let stopUpdated = false;
   let newStop = currentStop;
 
-  // Initial TP is 2%. If momentum remains strong, adaptive TP may extend it;
-  // the trailing/break-even SL independently protects profit and never moves backwards.
+  // Runner TP: keep the protective TP at 10%; from +2.5% the trailing stop
+  // manages the exit so strong moves can continue beyond 3%, 4%, 5% and higher.
   try {
     const candles5m = await getCandles(symbol, "Min5");
     const analysis5m = timeframeAnalysis(candles5m);
@@ -2026,9 +1973,8 @@ async function managePosition(symbol, position) {
     console.log("ADAPTIVE TP CHECK ERROR", JSON.stringify({symbol,direction,positionId:positionIdOf(position),error:e.message}));
   }
 
-  // Profit protection: once the trade reaches +1%, move SL safely above entry.
-  // From +2%, trail behind market price. The stop can only move in the
-  // profitable direction and is always kept a safe distance from market price.
+  // Profit protection: once the trade has moved +2%, first move SL just above
+  // entry. From +3%, trail behind price. Never move a stop backwards.
   try {
     let candidateStop = null;
     if (TRAILING_STOP_ENABLED && profitPct >= TRAILING_TRIGGER_PCT) {
@@ -2175,26 +2121,22 @@ async function entryRiskGate(symbol, signal) {
   }
   const openPositions=await getPositions();
   const open=openPositions.length;
-  // Cooldown applies between all new entries, not only when the account is flat.
-  // This prevents rapid stacking during a noisy candle sequence.
-  if(ENTRY_COOLDOWN_ALL_TRADES && tradeRiskState.lastEntryAt && Date.now()-tradeRiskState.lastEntryAt<ENTRY_COOLDOWN_MINUTES*60000) return {ok:false,reason:`Entry cooldown active (${ENTRY_COOLDOWN_MINUTES}m between entries)`};
-  if(open===0 && !ENTRY_COOLDOWN_ALL_TRADES && tradeRiskState.lastEntryAt && Date.now()-tradeRiskState.lastEntryAt<ENTRY_COOLDOWN_MINUTES*60000) return {ok:false,reason:`Entry cooldown active (${ENTRY_COOLDOWN_MINUTES}m)`};
+  // When no position is open, keep the existing entry cooldown.
+  // When a position is already open, a new independent signal may open another
+  // position, subject only to the existing max-position and same-direction limits.
+  if(open===0 && tradeRiskState.lastEntryAt && Date.now()-tradeRiskState.lastEntryAt<ENTRY_COOLDOWN_MINUTES*60000) return {ok:false,reason:`Entry cooldown active (${ENTRY_COOLDOWN_MINUTES}m)`};
   if(open>=MAX_OPEN_POSITIONS) return {ok:false,reason:`Maximum open positions reached (${MAX_OPEN_POSITIONS})`};
   const sameDirection=openPositions.filter(p=>positionDirection(p)===direction).length;
   if(sameDirection>=MAX_SAME_DIRECTION_POSITIONS) return {ok:false,reason:`Same-direction concentration limit reached (${MAX_SAME_DIRECTION_POSITIONS} ${direction})`};
 
-  // Account-level daily drawdown circuit breaker. Once breached, no new
-  // positions are opened until the local trading day resets. Existing positions
-  // remain under the independent trade manager/SL protection.
+  // v34.2-PRECISION: daily drawdown is telemetry only and never blocks a new
+  // breakout entry. Per-trade SL/TP, loss-streak cooldown, position limits,
+  // spread/liquidity/volatility filters, and final direction checks remain active.
   const account=await getAccount();
   const equity=accountEquity(account);
   if(equity>0 && !tradeRiskState.startEquity) {
     tradeRiskState.startEquity=equity;
     savePersistentState();
-  }
-  if(equity>0 && tradeRiskState.startEquity>0) {
-    const dailyDrawdown=(tradeRiskState.startEquity-equity)/tradeRiskState.startEquity;
-    if(DAILY_DRAWDOWN_PROTECTION_ENABLED && dailyDrawdown >= MAX_DAILY_DRAWDOWN_PCT) return {ok:false,reason:`Daily drawdown circuit breaker (${(dailyDrawdown*100).toFixed(2)}% >= ${(MAX_DAILY_DRAWDOWN_PCT*100).toFixed(2)}%)`,dailyDrawdown};
   }
 
   const news=await refreshNewsRisk();
@@ -2212,13 +2154,8 @@ async function entryRiskGate(symbol, signal) {
   if(atrPct>0.08) return {ok:false,reason:`Extreme volatility filter (ATR ${(atrPct*100).toFixed(2)}%)`};
   if(sig?.quality?.volatilitySpike) return {ok:false,reason:`Volatility spike filter (${VOLATILITY_SPIKE_ATR_MULTIPLIER}x ATR)`};
   if(sig?.quality?.lateEntryRisk) return {ok:false,reason:sig.reason || "Late entry location filter"};
-  if(Number(sig?.score||0) < MIN_SIGNAL_SCORE) return {ok:false,reason:`Signal score below safety threshold (${Number(sig?.score||0).toFixed(1)} < ${MIN_SIGNAL_SCORE})`};
-  if(Number(sig?.precisionScore||0) < MIN_PRECISION_SCORE) return {ok:false,reason:`Precision score below safety threshold (${Number(sig?.precisionScore||0).toFixed(1)} < ${MIN_PRECISION_SCORE})`};
-  if(REQUIRE_15M_ALIGNMENT && sig?.timeframes?.Min15?.bias !== direction) return {ok:false,reason:`15m trend not aligned (${sig?.timeframes?.Min15?.bias || "NA"})`};
-  if(REQUIRE_1H_ALIGNMENT && sig?.timeframes?.Min60?.bias !== direction) return {ok:false,reason:`1h trend not aligned (${sig?.timeframes?.Min60?.bias || "NA"})`};
-  if(REQUIRE_DAILY_ALIGNMENT && sig?.timeframes?.Day1?.bias !== direction) return {ok:false,reason:`Daily trend not aligned (${sig?.timeframes?.Day1?.bias || "NA"})`};
   if(!MANUAL_STOP_LOSS && Number(sig?.quality?.riskReward||0) < MIN_RISK_REWARD) return {ok:false,reason:`Risk/reward below minimum (${Number(sig?.quality?.riskReward||0).toFixed(2)} < ${MIN_RISK_REWARD})`};
-  return {ok:true,openPositions:open,sameDirectionPositions:sameDirection,equity,signal,dailyDrawdown:tradeRiskState.startEquity>0 ? (tradeRiskState.startEquity-equity)/tradeRiskState.startEquity : 0};
+  return {ok:true,openPositions:open,sameDirectionPositions:sameDirection,equity,signal};
 }
 
 
@@ -2429,27 +2366,25 @@ function breakoutOpportunityFromCandles(candles) {
 
 
 function fallbackMomentumOpportunity(candles) {
-  // v34.4.14 STRICT PULLBACK ENTRY:
-  // This path is not a no-pullback fallback. It is a closed-5m
-  // pullback -> momentum reclaim setup used when the breakout/retest scanner
-  // does not find a qualifying broken-level retest.
-  if (!Array.isArray(candles) || candles.length < 100) return null;
+  // v34.4.2 NO-PULLBACK QUALITY FALLBACK.
+  // Pullback/retest is NOT required. The fallback can enter on a closed 5m
+  // trend-continuation candle, but it still requires trend, momentum, volume,
+  // candle quality, limited extension and reasonable distance from EMA21.
+  if (!Array.isArray(candles) || candles.length < 80) return null;
   const closed = candles.slice(0, -1);
   const current = closed[closed.length - 1];
   const a = atr(closed, 14);
   if (!current || !(a > 0)) return null;
 
   const closes = closed.map(c => Number(c.close));
-  const e9s = emaSeries(closes, 9);
-  const e21s = emaSeries(closes, 21);
-  const e50s = emaSeries(closes, 50);
-  const e200s = emaSeries(closes, 200);
+  const e9s = ema(closes, 9);
+  const e21s = ema(closes, 21);
+  const e50s = ema(closes, 50);
   const i = closed.length - 1;
   const e9 = Number(e9s[i]);
   const e21 = Number(e21s[i]);
   const e50 = Number(e50s[i]);
-  const e200 = Number(e200s[i]);
-  if (![e9, e21, e50, e200].every(Number.isFinite)) return null;
+  if (![e9, e21, e50].every(Number.isFinite)) return null;
 
   const q = candleQuality(current);
   const range = Math.max(1e-12, Number(current.high) - Number(current.low));
@@ -2460,62 +2395,38 @@ function fallbackMomentumOpportunity(candles) {
   const bodyAtr = Math.abs(Number(current.close) - Number(current.open)) / a;
   const distE21 = Math.abs(Number(current.close) - e21) / a;
 
-  const longTrend = Number(current.close) > e9 && e9 > e21 && e21 > e50 && Number(current.close) > e200;
-  const shortTrend = Number(current.close) < e9 && e9 < e21 && e21 < e50 && Number(current.close) < e200;
-  if (!longTrend && !shortTrend) return null;
+  // Keep the no-pullback mode selective: never chase a move that is already
+  // far from EMA21, and reject weak-volume/weak-body candles.
+  if (distE21 > Math.max(ENTRY_TRIGGER_MAX_DISTANCE_ATR, 2.50)) return null;
+  // Discovery must not collapse to zero candidates because of one weak 5m candle.
+  // Final entry gates below still enforce score, HTF alignment, RR, volatility and risk.
+  if (bodyAtr < 0.05 || volumeRatio < 0.40) return null;
 
-  const direction = longTrend ? 'LONG' : 'SHORT';
-  const pullback = detectPullbackRetest(closed, e21, e50, a, direction);
-  const pullbackBars = Number(pullback?.barsSinceTouch);
-  const pullbackDepth = Number(pullback?.pullbackDepthAtr || 0);
-  const pullbackPass = Boolean(pullback?.confirmed) &&
-    Number.isFinite(pullbackBars) && pullbackBars <= ENTRY_TRIGGER_PULLBACK_MAX_BARS &&
-    pullbackDepth >= ENTRY_TRIGGER_MIN_PULLBACK_DEPTH_ATR;
-  if (!pullbackPass) return null;
+  const longTrend = Number(current.close) > e9 && e9 > e21 && e21 >= e50;
+  const shortTrend = Number(current.close) < e9 && e9 < e21 && e21 <= e50;
+  const longPass = longTrend && Boolean(q.bullish) &&
+    q.bodyPct >= Math.max(ENTRY_TRIGGER_MIN_BODY_PCT, 0.10) &&
+    closeLong >= 0.50;
+  const shortPass = shortTrend && Boolean(q.bearish) &&
+    q.bodyPct >= Math.max(ENTRY_TRIGGER_MIN_BODY_PCT, 0.10) &&
+    closeShort >= 0.50;
 
-  // The current CLOSED candle is the momentum/reclaim trigger. A weak candle,
-  // weak volume or poor close location cannot trigger an order after a pullback.
-  const momentumPass = volumeRatio >= ENTRY_MOMENTUM_MIN_VOLUME &&
-    bodyAtr >= ENTRY_MOMENTUM_MIN_BODY_ATR &&
-    (direction === 'LONG' ? q.bullish && closeLong >= ENTRY_MOMENTUM_CLOSE_LOCATION
-                           : q.bearish && closeShort >= ENTRY_MOMENTUM_CLOSE_LOCATION);
-  if (!momentumPass) return null;
+  if (!longPass && !shortPass) return null;
 
-  // Never chase an extended move away from EMA21 after the pullback.
-  if (distE21 > ENTRY_TRIGGER_MAX_DISTANCE_ATR) return null;
-
-  // Keep clear room to the next recent resistance/support. The current candle
-  // is excluded so a new high/low cannot falsely report its own level as room.
-  const srWindow = closed.slice(Math.max(0, closed.length - SR_LOOKBACK - 1), -1);
-  if (srWindow.length < 10) return null;
-  const recentResistance = Math.max(...srWindow.map(c => Number(c.high)));
-  const recentSupport = Math.min(...srWindow.map(c => Number(c.low)));
-  const roomAtr = direction === 'LONG'
-    ? (recentResistance - Number(current.close)) / a
-    : (Number(current.close) - recentSupport) / a;
-  if (roomAtr < ENTRY_SR_MIN_ROOM_ATR) return null;
-
-  // Additional anti-pump guard: do not enter if the trigger candle itself is
-  // abnormally large. The move must be a controlled reclaim, not a chase.
-  if (bodyAtr >= VOLATILITY_SPIKE_ATR_MULTIPLIER) return null;
-
-  let score = 64;
+  const direction = longPass ? 'LONG' : 'SHORT';
+  const closeLocation = direction === 'LONG' ? closeLong : closeShort;
+  let score = 60;
+  if (volumeRatio >= 0.75) score += 4;
   if (volumeRatio >= 1.00) score += 6;
-  if (volumeRatio >= 1.25) score += 5;
-  if (bodyAtr >= 0.15) score += 4;
-  if (bodyAtr >= 0.25) score += 4;
-  if ((direction === 'LONG' ? closeLong : closeShort) >= 0.70) score += 5;
-  if (distE21 <= 0.75) score += 4;
-  if (pullbackDepth >= 0.50) score += 5;
-  if (roomAtr >= 1.00) score += 3;
-  score = Math.min(100, score);
-
-  const counterWickPct = direction === 'LONG' ? q.upperWickPct : q.lowerWickPct;
-  let precisionScore = score;
-  if (counterWickPct <= 0.20) precisionScore += 7;
-  else if (counterWickPct <= 0.30) precisionScore += 3;
-  else if (counterWickPct >= 0.45) precisionScore -= 7;
-  precisionScore = Math.max(0, Math.min(100, precisionScore));
+  if (volumeRatio >= 1.30) score += 5;
+  if (bodyAtr >= 0.12) score += 3;
+  if (bodyAtr >= 0.25) score += 5;
+  if (closeLocation >= 0.60) score += 3;
+  if (closeLocation >= 0.70) score += 4;
+  if (distE21 <= 0.75) score += 3;
+  if (e9 > e21 && e21 > e50 && direction === 'LONG') score += 3;
+  if (e9 < e21 && e21 < e50 && direction === 'SHORT') score += 3;
+  score = Math.min(95, score);
 
   const recent = closed.slice(Math.max(0, closed.length - 12), closed.length);
   const breakoutLevel = direction === 'LONG'
@@ -2528,7 +2439,7 @@ function fallbackMomentumOpportunity(candles) {
     signal: direction,
     direction,
     score,
-    precisionScore,
+    precisionScore: score,
     price: Number(current.close),
     atr: a,
     volumeRatio,
@@ -2540,12 +2451,12 @@ function fallbackMomentumOpportunity(candles) {
     bodyPct: q.bodyPct,
     upperWickPct: q.upperWickPct,
     lowerWickPct: q.lowerWickPct,
-    counterWickPct,
-    closeLocation: direction === 'LONG' ? closeLong : closeShort,
+    counterWickPct: direction === 'LONG' ? q.upperWickPct : q.lowerWickPct,
+    closeLocation,
     candleTime: current.time,
     breakoutCandleTime: current.time,
-    resistance: recentResistance,
-    support: recentSupport,
+    resistance: swingHigh,
+    support: swingLow,
     swingLow,
     swingHigh,
     confirmed: true,
@@ -2554,14 +2465,13 @@ function fallbackMomentumOpportunity(candles) {
     directionSpecificPass: true,
     early: false,
     retestConfirmed: false,
-    pullbackEntryPass: true,
-    pullbackTriggerPass: true,
-    pullbackType: pullback.type,
-    pullbackDepthAtr: pullbackDepth,
-    pullbackBarsAgo: pullbackBars,
-    resistanceRoomAtr: roomAtr,
-    entryMode: '5M_PULLBACK_MOMENTUM_RECLAIM',
-    reason: `${direction} closed 5m pullback + momentum reclaim; ${roomAtr.toFixed(2)} ATR room to next S/R`
+    pullbackEntryPass: false,
+    fallbackMomentum: true,
+    pullbackType: null,
+    pullbackDepthAtr: 0,
+    pullbackBarsAgo: null,
+    entryMode: '5M_TREND_MOMENTUM_NO_PULLBACK',
+    reason: `${direction} 5m closed trend-momentum confirmation; pullback/retest not required`
   };
 }
 
@@ -2843,7 +2753,7 @@ async function autoTradeOnce() {
 
 app.get("/", (req,res) => res.json({
   service:"mexc-futures-trading-bot",
-  version:"34.4.14-strict-pullback-risk-guard",
+  version:"34.4.2-no-pullback-quality",
   symbol:SYMBOL,
   realTradingEnabled:REAL_TRADING_ENABLED,
   autoTradingEnabled:AUTO_TRADING_ENABLED
@@ -2851,7 +2761,7 @@ app.get("/", (req,res) => res.json({
 
 app.get("/health", (req,res) => res.json({
   success:true,
-  version:"34.4.14-strict-pullback-risk-guard",
+  version:"34.4.2-no-pullback-quality",
   credentialsConfigured:!!(ACCESS_KEY && SECRET_KEY),
   realTradingEnabled:REAL_TRADING_ENABLED,
   autoTradingEnabled:AUTO_TRADING_ENABLED,
@@ -2872,7 +2782,7 @@ app.get("/health", (req,res) => res.json({
   maxOpenPositions:MAX_OPEN_POSITIONS,
     maxSameDirectionPositions:MAX_SAME_DIRECTION_POSITIONS,
   maxTradesPerDay:MAX_TRADES_PER_DAY,
-  dailyDrawdownProtectionEnabled:DAILY_DRAWDOWN_PROTECTION_ENABLED,
+  dailyDrawdownProtectionEnabled:false,
   liquidityMin24hUSDT:LIQUIDITY_MIN_24H_USDT,
   maxSpreadPct:MAX_SPREAD_PCT,
   mexcMinRequestGapMs:MEXC_MIN_REQUEST_GAP_MS,
@@ -3032,7 +2942,7 @@ app.get("/api/news-risk", async (req,res) => {
 
 app.get("/api/config", (req,res) => res.json({
   success:true,
-  version:"34.4.14-strict-pullback-risk-guard",
+  version:"34.4.2-no-pullback-quality",
   defaults:{
     maxOrderUSDT:MAX_ORDER_USDT,
   adaptiveOrderSize:ADAPTIVE_ORDER_SIZE,
@@ -3076,13 +2986,11 @@ app.get("/api/config", (req,res) => res.json({
     maxOpenPositions:MAX_OPEN_POSITIONS,
     maxSameDirectionPositions:MAX_SAME_DIRECTION_POSITIONS,
     maxTradesPerDay:MAX_TRADES_PER_DAY,
-    dailyDrawdownProtectionEnabled:DAILY_DRAWDOWN_PROTECTION_ENABLED,
-    maxDailyDrawdownPct:MAX_DAILY_DRAWDOWN_PCT,
-    entryCooldownAllTrades:ENTRY_COOLDOWN_ALL_TRADES,
     entryCooldownMinutes:ENTRY_COOLDOWN_MINUTES,
     maxLossStreak:MAX_LOSS_STREAK,
     lossStreakCooldownMinutes:LOSS_STREAK_COOLDOWN_MINUTES,
     volatilitySpikeAtrMultiplier:VOLATILITY_SPIKE_ATR_MULTIPLIER,
+    dailyDrawdownProtectionEnabled:false,
     liquidityMin24hUSDT:LIQUIDITY_MIN_24H_USDT,
     maxSpreadPct:MAX_SPREAD_PCT,
     minRiskReward:MIN_RISK_REWARD,
@@ -3099,7 +3007,7 @@ app.get("/api/config", (req,res) => res.json({
   allowedSymbols:ALLOWED_SYMBOLS,
   realTradingEnabled:REAL_TRADING_ENABLED,
   autoTradingEnabled:AUTO_TRADING_ENABLED,
-  safetyNote:"LIVE ENTRY: a meaningful pullback/retest plus a closed 5m directional reclaim is required; live/in-progress candles and no-pullback continuation entries are blocked. 15m/1h/1D alignment, score, precision, spread, slippage, liquidity, volatility and minimum R:R gates must pass. Direction is locked at preflight and order time. Structure SL uses swing + ATR buffer with a 0.50%-1.25% maximum distance under the default profile. Break-even activates at +1%, trailing activates at +2% and only moves the stop in the protective direction. No stop-hit probability or profit percentage is guaranteed.",
+  safetyNote:"LIVE ENTRY: preferred confirmed closed 5m breakout/retest; if no breakout candidate exists, a closed 5m momentum fallback may qualify, but 15m/1h/1D conflict and final risk gates still block entries. Direction is locked at preflight and order time. Structure SL uses swing + ATR buffer with 1%-3% distance bounds. No stop-hit probability or profit percentage is guaranteed.",
   targetFirstMode:true,
   symbolUniverse:{source:symbolUniverseCache.source, updatedAt:symbolUniverseCache.time ? new Date(symbolUniverseCache.time).toISOString() : null, count:ALLOWED_SYMBOLS.length, targetCount:null, scanBatchSize:SCAN_BATCH_SIZE, scanCycle, removedFromCoreSymbols:symbolUniverseCache.removed, marketRanked:symbolUniverseCache.marketRanked}
 }));
